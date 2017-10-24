@@ -585,14 +585,14 @@ void server_loop() {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
         
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-            if(server_sock){
-	        close(server_sock);
-	    }
             handle_client(client_sock, client_addr);
             exit(0);
         }
 	if(client_sock){
             close(client_sock);
+	}
+        if(server_sock){
+	    close(server_sock);
 	}
     }
 
