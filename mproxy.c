@@ -11,8 +11,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <netinet/in.h> 
-
-
+#include <stdarg.h>
 
 
 #define BUF_SIZE 8192
@@ -36,16 +35,7 @@
 
 #define MAX_HEADER_SIZE 8192
 
-
-#if defined(OS_ANDROID)
-#include <android/log.h>
- 
-#define LOG(fmt...) __android_log_print(ANDROID_LOG_DEBUG,__FILE__,##fmt)
- 
-#else
-#define LOG(fmt...)  do { fprintf(stderr,"%s %s ",__DATE__,__TIME__); fprintf(stderr, ##fmt); } while(0)
-#endif
-
+#define COMMLIB_DBG_FILE  "./Log.log"
 
 char remote_host[128]; 
 int remote_port; 
@@ -86,9 +76,23 @@ void get_info(char * output);
 const char * get_work_mode() ;
 int create_connection() ;
 int _main(int argc, char *argv[]) ;
+ssize_t readLine(int sock, char *buf, size_t size);
 
 
-
+void LOG(const char *str, ...)
+{
+    va_list ap;
+    FILE *fh = NULL;
+    if((fh = fopen(COMMLIB_DBG_FILE, "a")))
+    {
+        va_start(ap, str);
+        vfprintf(fh, str, ap);
+        fprintf(fh, "\n");
+        va_end(ap); 
+        fclose(fh);
+        fh = NULL;
+    }   
+}
 
 ssize_t readLine(int sock, char *buf, size_t size)
 {
