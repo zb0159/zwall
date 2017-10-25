@@ -13,7 +13,7 @@
 #include <netinet/in.h> 
 
 
-#define DEBUG
+
 
 #define BUF_SIZE 8192
 
@@ -92,7 +92,7 @@ int _main(int argc, char *argv[]) ;
 
 ssize_t readLine(int sock, char *buf, size_t size)
 {
-     int i = 0;
+    int i = 0;
     char c = '\0';
     int n ;
     while ((i < size - 1) && (c != '\n'))
@@ -119,7 +119,7 @@ ssize_t readLine(int sock, char *buf, size_t size)
     return(i);
 }
 
-int read_header(int fd, void * buffer)
+int read_header(const int fd, void * buffer)
 {
     // bzero(header_buffer,sizeof(MAX_HEADER_SIZE));
     memset(header_buffer,0,MAX_HEADER_SIZE);
@@ -133,7 +133,7 @@ int read_header(int fd, void * buffer)
         int total_read = readLine(fd,line_buffer,2048);
         if(total_read <= 0)
         {   
-	    LOG("CLIENT_SOCKET_EEROR\n");
+	    LOG("read-header-CLIENT_SOCKET_EEROR\n");
             return CLIENT_SOCKET_ERROR;
         }
         //防止header缓冲区蛮越界
@@ -143,7 +143,7 @@ int read_header(int fd, void * buffer)
            base_ptr += total_read;
         } else 
         {   
-	    LOG("HEADER_BUFFER_FULL\n");
+	    LOG("read-header-HEADER_BUFFER_FULL\n");
             return HEADER_BUFFER_FULL;
         }
 
@@ -152,7 +152,6 @@ int read_header(int fd, void * buffer)
         {
             break;
         }
-
     }
     return 0;
 
@@ -163,7 +162,12 @@ void extract_server_path(const char * header,char * output)
     char * p = strstr(header,"GET /");
     if(p) {
         char * p1 = strchr(p+4,' ');
-        strncpy(output,p+4,(int)(p1  - p - 4) );
+	if(p1){
+            strncpy(output,p+4,(int)(p1  - p - 4) );
+	}else{
+	    strncpy(output,p+4,1);
+	}	
+	LOG("EXTRACT_SERVER_PATH_OUTPUT----%s\n",output);
     }
     
 }
@@ -234,7 +238,8 @@ int extract_host(const char * header)
         remote_port = 80;
     
     }
-    LOG("remote_host=========%s\n",remote_host);
+    LOG("extra-host--%s\n",header);
+    LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
     return 0;
 }
 
@@ -341,11 +346,6 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
     int is_http_tunnel = 0; 
     if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
     {
-        
-        #ifdef DEBUG
-        LOG(" ============ handle new client ============\n");
-        LOG(">>>Header:%s\n",header_buffer);
-        #endif
         
         if(read_header(client_sock,header_buffer) < 0)
         {
