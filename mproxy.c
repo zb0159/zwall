@@ -587,7 +587,14 @@ void server_loop() {
 
     while (1) {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
-        
+        #ifdef PROPERTY
+	char *client_ip = inet_ntoa(client_addr.sin_addr);
+	if(strcmp(client_ip,"119.29.173.95") != 0) {
+            LOG("%s have  no prorirty\n",client_ip);
+            continue;
+        }
+	#endif
+ 
         if (fork() == 0) { // 创建子进程处理客户端连接请求
             if(server_sock){
 	        close(server_sock);
