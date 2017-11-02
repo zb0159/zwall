@@ -44,10 +44,6 @@ int local_port;
 int server_sock; 
 int client_sock;
 int remote_sock;
-
-
-
-
 char * header_buffer ;
 
 
@@ -69,6 +65,7 @@ typedef struct {
     int io_flag;
 }SOCK;
 
+SOCK sock;
 void server_loop();
 void stop_server();
 void handle_client(int client_sock);
@@ -366,7 +363,8 @@ void handle_client(int client_sock)
         } else 
         {
             char * p = strstr(header_buffer,"CONNECT"); /* 判断是否是http 隧道请求 */
-            if(p) 
+            LOG("header_buffer=%s\n",header_buffer);
+	    if(p) 
             {
                 LOG("receive CONNECT request\n");
                 is_http_tunnel = 1;
@@ -396,11 +394,10 @@ void handle_client(int client_sock)
         return;
     
     }
-    SOCK sock;
     sock.client_sock = client_sock;
     sock.remote_sock = remote_sock;
     sock.is_http_tunnel = is_http_tunnel;
-
+    sock.io_flag = io_flag;
     if ((pthread_create(&newthread , NULL, (void *)client_to_remote,(void *)&sock) != 0)){
             LOG("create thread error\n");
             exit(0);
@@ -409,6 +406,7 @@ void handle_client(int client_sock)
             LOG("create thread error\n");
             exit(0);
     }
+    close(sock.client_sock);
 
 }
 
@@ -421,8 +419,6 @@ void client_to_remote(SOCK sock){// 创建子进程用于从客户端转发数�
         
         forward_data(sock.client_sock, sock.remote_sock);
 	close(sock.remote_sock);
-	
-	close(sock.client_sock);
 
 }
 //ddd
@@ -430,10 +426,10 @@ void remote_to_client(SOCK sock) {// 创建子进程用于转发从远端socket�
 
         if(sock.io_flag == W_S_ENC)
         {
-            sock.io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+            io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
         } else if (sock.io_flag == R_C_DEC)
         {
-             sock.io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+             io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
         }
 
         if(sock.is_http_tunnel)
@@ -443,7 +439,6 @@ void remote_to_client(SOCK sock) {// 创建子进程用于转发从远端socket�
 
         forward_data(sock.remote_sock, sock.client_sock);
 	close(sock.remote_sock);
-	close(sock.client_sock);
 }
 
 
