@@ -62,6 +62,12 @@ static int io_flag; /* 网络io的一些标志位 */
 static int m_pid; /* 保主进程id */
 
 
+typedef struct {
+    int client_sock;
+    int remote_sock;
+    int is_http_tunnel;
+
+}SOCK;
 
 void server_loop();
 void stop_server();
@@ -77,8 +83,8 @@ const char * get_work_mode() ;
 int create_connection() ;
 int _main(int argc, char *argv[]) ;
 ssize_t readLine(int sock, char *buf, size_t size);
-void remote_to_client(int is_http_tunnel);
-void client_to_remote(int is_http_tunnel);
+void remote_to_client(SOCK);
+void client_to_remote(SOCK);
 
 void LOG(const char *str, ...)
 {
@@ -390,11 +396,16 @@ void handle_client(int client_sock)
         return;
     
     }
-    if ((pthread_create(&newthread , NULL, (void *)client_to_remote,&is_http_tunnel) != 0)){
+    SOCK sock;
+    sock.client_sock = client_sock;
+    sock.remote_sock = remote_sock;
+    sock.is_http_tunnel = is_http_tunnel;
+
+    if ((pthread_create(&newthread , NULL, (void *)client_to_remote,(void *)&sock) != 0)){
             LOG("create thread error\n");
             exit(0);
     }
-    if ((pthread_create(&newthread , NULL, (void *)remote_to_client, &is_http_tunnel) != 0)){
+    if ((pthread_create(&newthread , NULL, (void *)remote_to_client, (void *)&sock) != 0)){
             LOG("create thread error\n");
             exit(0);
     }
@@ -402,19 +413,20 @@ void handle_client(int client_sock)
 }
 
 //aaa
-void client_to_remote(int is_http_tunnel){// 创建子进程用于从客户端转发数据到远端socket接口
-        if(strlen(header_buffer) > 0 && !is_http_tunnel) 
+void client_to_remote(SOCK sock){// 创建子进程用于从客户端转发数据到远端socket接口
+        if(strlen(header_buffer) > 0 && !sock.is_http_tunnel) 
         {
-            forward_header(remote_sock); //普通的http请求先转发header
+            forward_header(sock.remote_sock); //普通的http请求先转发header
         } 
         
-        forward_data(client_sock, remote_sock);
-	close(remote_sock);
-	close(client_sock);
+        forward_data(sock.client_sock, sock.remote_sock);
+	close(sock.remote_sock);
+	
+	close(sock.client_sock);
 
 }
 //ddd
-void remote_to_client(int is_http_tunnel) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
+void remote_to_client(SOCK sock) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
 
         if(io_flag == W_S_ENC)
         {
@@ -424,14 +436,14 @@ void remote_to_client(int is_http_tunnel) {// 创建子进程用于转发从远�
              io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
         }
 
-        if(is_http_tunnel)
+        if(sock.is_http_tunnel)
         {
-            send_tunnel_ok(client_sock);
+            send_tunnel_ok(sock.client_sock);
         } 
 
-        forward_data(remote_sock, client_sock);
-	close(remote_sock);
-	close(client_sock);
+        forward_data(sock.remote_sock, sock.client_sock);
+	close(sock.remote_sock);
+	close(sock.client_sock);
 }
 
 
@@ -617,7 +629,6 @@ void server_loop() {
 	    LOG("create thread error\n");
 	    exit(0);
 	}
-	close(client_sock); 
     }
 
 }
