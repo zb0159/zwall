@@ -1,6 +1,6 @@
 CC = gcc
 
-CFLAGS = -g -Wall -Werror
+CFLAGS = -g -Wall -Werror -lpthread 
 all: mproxy
 
 mproxy: mproxy.o

@@ -12,7 +12,7 @@
 #include <sys/wait.h>
 #include <netinet/in.h> 
 #include <stdarg.h>
-
+#include <pthread.h>
 
 #define BUF_SIZE 8192
 
@@ -65,7 +65,7 @@ static int m_pid; /* 保主进程id */
 
 void server_loop();
 void stop_server();
-void handle_client(int client_sock, struct sockaddr_in client_addr);
+void handle_client(int client_sock);
 void forward_header(int destination_sock);
 void forward_data(int source_sock, int destination_sock);
 void rewrite_header();
@@ -345,7 +345,7 @@ const char * get_work_mode()
 }
 
 /* 处理客户端的连接 */
-void handle_client(int client_sock, struct sockaddr_in client_addr)
+void handle_client(int client_sock)
 {
     int is_http_tunnel = 0; 
     if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
@@ -396,8 +396,8 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
         
         forward_data(client_sock, remote_sock);
-        close(remote_sock);
-        close(client_sock);
+	close(remote_sock);
+	close(client_sock);
         exit(0);
     }
 
@@ -417,8 +417,8 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
 
         forward_data(remote_sock, client_sock);
-        close(remote_sock);
-        close(client_sock);
+	close(remote_sock);
+	close(client_sock);
         exit(0);
     }
 
@@ -586,21 +586,26 @@ void sigchld_handler(int signal) {
 void server_loop() {
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
-
+    pthread_t newthread;
     while (1) {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
-        #ifdef PROPERTY
 	char *client_ip = inet_ntoa(client_addr.sin_addr);
+	LOG("%s IN\n",client_ip);
+        #ifdef PROPERTY
 	if(strcmp(client_ip,"119.29.173.95") != 0) {
             LOG("%s have  no prorirty\n",client_ip);
             continue;
         }
-	#endif
  
         if (fork() == 0) { // 创建子进程处理客户端连接请求
 	    handle_client(client_sock, client_addr);
             exit(0);
         }
+	#endif
+	if ((pthread_create(&newthread , NULL, (void *)handle_client, &client_sock) != 0)){ 
+	    perror("create thread error\n");
+	    exit(0);
+	} 
     }
 
 }
@@ -644,7 +649,6 @@ void start_server(int daemon)
         {
             m_pid = pid;
             LOG("mporxy pid is: [%d]\n",pid);
-            close(server_sock);
 	    exit(0);
         } else 
         {
