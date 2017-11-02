@@ -242,8 +242,8 @@ int extract_host(const char * header)
         remote_port = 80;
     
     }
-    LOG("extra-host--%s\n",header);
-    LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
+    LOG("extra-host=%s\n",header);
+    LOG("extra_host=%s:[%d]\n",remote_host,remote_port);
     return 0;
 }
 
@@ -348,6 +348,7 @@ const char * get_work_mode()
 void handle_client(int client_sock)
 {
     int is_http_tunnel = 0; 
+    pthread_t newthread;
     if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
     {
         
@@ -386,10 +387,19 @@ void handle_client(int client_sock)
     if ((remote_sock = create_connection()) < 0) {
         LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
         return;
+    
+    }
+    if ((pthread_create(&newthread , NULL, (void *)client_to_remote) != 0)){
+            LOG("create thread error\n");
+            exit(0);
+    }
+    if ((pthread_create(&newthread , NULL, (void *)remote_to_client) != 0)){
+            LOG("create thread error\n");
+            exit(0);
     }
 
-    if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
-
+}
+void client_to_remote(){// 创建子进程用于从客户端转发数据到远端socket接口
         if(strlen(header_buffer) > 0 && !is_http_tunnel) 
         {
             forward_header(remote_sock); //普通的http请求先转发header
@@ -398,10 +408,8 @@ void handle_client(int client_sock)
         forward_data(client_sock, remote_sock);
 	close(remote_sock);
 	close(client_sock);
-        exit(0);
-    }
-
-    if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+}
+void remote_to_client() {// 创建子进程用于转发从远端socket接口过来的数据到客户端
 
         if(io_flag == W_S_ENC)
         {
@@ -419,10 +427,8 @@ void handle_client(int client_sock)
         forward_data(remote_sock, client_sock);
 	close(remote_sock);
 	close(client_sock);
-        exit(0);
-    }
-
 }
+
 
 void forward_header(int destination_sock)
 {
@@ -596,16 +602,17 @@ void server_loop() {
             LOG("%s have  no prorirty\n",client_ip);
             continue;
         }
- 
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-	    handle_client(client_sock, client_addr);
+	    handle_client(client_sock);
             exit(0);
         }
 	#endif
+ 
 	if ((pthread_create(&newthread , NULL, (void *)handle_client, &client_sock) != 0)){ 
-	    perror("create thread error\n");
+	    LOG("create thread error\n");
 	    exit(0);
-	} 
+	}
+	close(client_sock); 
     }
 
 }
