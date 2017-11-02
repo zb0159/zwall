@@ -66,7 +66,7 @@ typedef struct {
     int client_sock;
     int remote_sock;
     int is_http_tunnel;
-
+    int io_flag;
 }SOCK;
 
 void server_loop();
@@ -428,12 +428,12 @@ void client_to_remote(SOCK sock){// 创建子进程用于从客户端转发数�
 //ddd
 void remote_to_client(SOCK sock) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
 
-        if(io_flag == W_S_ENC)
+        if(sock.io_flag == W_S_ENC)
         {
-            io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-        } else if (io_flag == R_C_DEC)
+            sock.io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+        } else if (sock.io_flag == R_C_DEC)
         {
-             io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+             sock.io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
         }
 
         if(sock.is_http_tunnel)
