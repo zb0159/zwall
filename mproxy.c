@@ -396,6 +396,8 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
         
         forward_data(client_sock, remote_sock);
+        close(remote_sock);
+        close(client_sock);
         exit(0);
     }
 
@@ -415,11 +417,11 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
 
         forward_data(remote_sock, client_sock);
+        close(remote_sock);
+        close(client_sock);
         exit(0);
     }
 
-    close(remote_sock);
-    close(client_sock);
 }
 
 void forward_header(int destination_sock)
@@ -596,15 +598,9 @@ void server_loop() {
 	#endif
  
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-            if(server_sock){
-	        close(server_sock);
-	    }
-            handle_client(client_sock, client_addr);
+	    handle_client(client_sock, client_addr);
             exit(0);
         }
-	if(client_sock){
-            close(client_sock);
-	}
     }
 
 }
@@ -660,6 +656,7 @@ void start_server(int daemon)
     {
         server_loop();
     }
+    close(server_sock); 
 
 }
 
