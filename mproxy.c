@@ -35,7 +35,7 @@
 
 #define MAX_HEADER_SIZE 8192
 
-#define COMMLIB_DBG_FILE  "./Log.log"
+#define COMMLIB_DBG_FILE  "./log.log"
 
 char remote_host[128]; 
 int remote_port; 
@@ -65,10 +65,10 @@ typedef struct {
     int io_flag;
 }SOCK;
 
-SOCK sock;
+SOCK z_sock;
 void server_loop();
 void stop_server();
-void handle_client(int client_sock);
+void handle_client(void *);
 void forward_header(int destination_sock);
 void forward_data(int source_sock, int destination_sock);
 void rewrite_header();
@@ -80,8 +80,8 @@ const char * get_work_mode() ;
 int create_connection() ;
 int _main(int argc, char *argv[]) ;
 ssize_t readLine(int sock, char *buf, size_t size);
-void remote_to_client(SOCK);
-void client_to_remote(SOCK);
+void remote_to_client(void *);
+void client_to_remote(void *);
 
 void LOG(const char *str, ...)
 {
@@ -126,22 +126,23 @@ ssize_t readLine(int sock, char *buf, size_t size)
     buf[i] = '\0';
     return(i);
 }
-
+//hhh
 int read_header(const int fd, void * buffer)
 {
     // bzero(header_buffer,sizeof(MAX_HEADER_SIZE));
     memset(header_buffer,0,MAX_HEADER_SIZE);
     char line_buffer[2048];
     char * base_ptr = header_buffer;
-
+    LOG("<read_header>client_sock=%d\nhead_buffer=%s\n</read_header>",fd,header_buffer);
     for(;;)
     {
         memset(line_buffer,0,2048);
 
         int total_read = readLine(fd,line_buffer,2048);
+    LOG("<read_header>client_sock=%d\nline_buffer=%s\n</read_header>",fd,line_buffer);
         if(total_read <= 0)
         {   
-	    LOG("read-header-CLIENT_SOCKET_EEROR\n");
+	    LOG("<read-header>-CLIENT_SOCKET_EEROR\n");
             return CLIENT_SOCKET_ERROR;
         }
         //防止header缓冲区蛮越界
@@ -151,7 +152,7 @@ int read_header(const int fd, void * buffer)
            base_ptr += total_read;
         } else 
         {   
-	    LOG("read-header-HEADER_BUFFER_FULL\n");
+	    LOG("<read-header>-HEADER_BUFFER_FULL\n");
             return HEADER_BUFFER_FULL;
         }
 
@@ -161,6 +162,7 @@ int read_header(const int fd, void * buffer)
             break;
         }
     }
+    LOG("header_buffer==================%s\n",header_buffer);
     return 0;
 
 }
@@ -349,9 +351,11 @@ const char * get_work_mode()
 }
 
 /* 处理客户端的连接 */
-void handle_client(int client_sock)
+void handle_client(void * arg)
 {
-    int is_http_tunnel = 0; 
+    int client_sock = *(int *)arg;
+    int is_http_tunnel = 0;
+    SOCK sock; 
     pthread_t newthread;
     if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
     {
@@ -363,7 +367,6 @@ void handle_client(int client_sock)
         } else 
         {
             char * p = strstr(header_buffer,"CONNECT"); /* 判断是否是http 隧道请求 */
-            LOG("header_buffer=%s\n",header_buffer);
 	    if(p) 
             {
                 LOG("receive CONNECT request\n");
@@ -398,21 +401,22 @@ void handle_client(int client_sock)
     sock.remote_sock = remote_sock;
     sock.is_http_tunnel = is_http_tunnel;
     sock.io_flag = io_flag;
-    if ((pthread_create(&newthread , NULL, (void *)client_to_remote,(void *)&sock) != 0)){
-            LOG("create thread error\n");
-            exit(0);
-    }
     if ((pthread_create(&newthread , NULL, (void *)remote_to_client, (void *)&sock) != 0)){
             LOG("create thread error\n");
-            exit(0);
+            return ;
+    }
+    if ((pthread_create(&newthread , NULL, (void *)client_to_remote, (void *)&sock) != 0)){
+            LOG("create thread error\n");
+            return ;
     }
     close(sock.client_sock);
 
 }
 
 //aaa
-void client_to_remote(SOCK sock){// 创建子进程用于从客户端转发数据到远端socket接口
-        if(strlen(header_buffer) > 0 && !sock.is_http_tunnel) 
+void client_to_remote(void * arg){// 创建子进程用于从客户端转发数据到远端socket接口
+ 	SOCK sock = *(SOCK *)arg;
+        if(strlen(header_buffer) > 0 && !(sock.is_http_tunnel)) 
         {
             forward_header(sock.remote_sock); //普通的http请求先转发header
         } 
@@ -422,8 +426,8 @@ void client_to_remote(SOCK sock){// 创建子进程用于从客户端转发数�
 
 }
 //ddd
-void remote_to_client(SOCK sock) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
-
+void remote_to_client(void * arg) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
+	SOCK sock = *(SOCK *)arg;
         if(sock.io_flag == W_S_ENC)
         {
             io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
@@ -544,12 +548,12 @@ int create_connection() {
     int sock;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        LOG("CLIENT_SOCKET_ERROR\n");
+        LOG("<create_connetion>CLIENT_SOCKET_ERROR</create_connection\n");
 	return CLIENT_SOCKET_ERROR;
     }
 
     if ((server = gethostbyname(remote_host)) == NULL) {
-        LOG("CLIENT_RESOLVE_ERROR\n");
+        LOG("<create_connetion>CLIENT_RESOLVE_ERROR</create_connection\n");
         errno = EFAULT;
         return CLIENT_RESOLVE_ERROR;
     }
@@ -560,8 +564,10 @@ int create_connection() {
     server_addr.sin_port = htons(remote_port);
 
     if (connect(sock, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        LOG("CLIENT_CONNECT_ERROR\n");
+        LOG("<create_connection>CLIENT_CONNECT_ERROR</create_connection\n");
         return CLIENT_CONNECT_ERROR;
+    }{
+        LOG("<create_connection>connected to host:%s port:%d</create_connection\n",remote_host,remote_port);
     }
 
     return sock;
@@ -608,7 +614,7 @@ void server_loop() {
     while (1) {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
 	char *client_ip = inet_ntoa(client_addr.sin_addr);
-	LOG("%s IN\n",client_ip);
+	LOG("<server_loop>\n%s IN-----client_sock=%d\n</server_loop>\n",client_ip,client_sock);
         #ifdef PROPERTY
 	if(strcmp(client_ip,"119.29.173.95") != 0) {
             LOG("%s have  no prorirty\n",client_ip);
@@ -619,10 +625,10 @@ void server_loop() {
             exit(0);
         }
 	#endif
- 
-	if ((pthread_create(&newthread , NULL, (void *)handle_client, &client_sock) != 0)){ 
+//ll 
+	if ((pthread_create(&newthread , NULL, (void *)handle_client,(void *)&client_sock) != 0)){ 
 	    LOG("create thread error\n");
-	    exit(0);
+	    return;
 	}
     }
 
