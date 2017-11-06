@@ -56,7 +56,7 @@ enum
 
 static int io_flag; /* 网络io的一些标志位 */
 static int m_pid; /* 保主进程id */
-
+#define LOG(fmt...)  do { fprintf(stderr, ##fmt); } while(0)
 
 typedef struct {
     int client_sock;
@@ -65,7 +65,6 @@ typedef struct {
     int io_flag;
 }SOCK;
 
-SOCK z_sock;
 void server_loop();
 void stop_server();
 void handle_client(void *);
@@ -83,7 +82,7 @@ ssize_t readLine(int sock, char *buf, size_t size);
 void remote_to_client(void *);
 void client_to_remote(void *);
 
-void LOG(const char *str, ...)
+void LOGlog(const char *str, ...)
 {
     va_list ap;
     FILE *fh = NULL;
@@ -133,13 +132,11 @@ int read_header(const int fd, void * buffer)
     memset(header_buffer,0,MAX_HEADER_SIZE);
     char line_buffer[2048];
     char * base_ptr = header_buffer;
-    LOG("<read_header>client_sock=%d\nhead_buffer=%s\n</read_header>",fd,header_buffer);
     for(;;)
     {
         memset(line_buffer,0,2048);
 
         int total_read = readLine(fd,line_buffer,2048);
-    LOG("<read_header>client_sock=%d\nline_buffer=%s\n</read_header>",fd,line_buffer);
         if(total_read <= 0)
         {   
 	    LOG("<read-header>-CLIENT_SOCKET_EEROR\n");
@@ -162,7 +159,7 @@ int read_header(const int fd, void * buffer)
             break;
         }
     }
-    LOG("header_buffer==================%s\n",header_buffer);
+    //ddLOG("<read_header>\nheader_buffer==================%s\n</read_header>\n",header_buffer);
     return 0;
 
 }
@@ -248,8 +245,8 @@ int extract_host(const char * header)
         remote_port = 80;
     
     }
-    LOG("extra-host=%s\n",header);
-    LOG("extra_host=%s:[%d]\n",remote_host,remote_port);
+    //ddLOG("extra-host=%s\n",header);
+    //ddLOG("extra_host=%s:[%d]\n",remote_host,remote_port);
     return 0;
 }
 
@@ -262,7 +259,7 @@ int send_tunnel_ok(int client_sock)
     strcpy(buffer,resp);
     if(send_data(client_sock,buffer,len) < 0)
     {
-        perror("Send http tunnel response  failed\n");
+        LOG("<send_tunnel_ok>Send http tunnel response to clinet_sock[:%d] failed</send_tunnel_ok>\n",client_sock);
         return -1;
     }
     return 0;
@@ -355,16 +352,16 @@ void handle_client(void * arg)
 {
     int client_sock = *(int *)arg;
     int is_http_tunnel = 0;
-    SOCK sock; 
     pthread_t newthread;
-    if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
-    {
+    SOCK *sock = (SOCK *)malloc(sizeof(SOCK)); 
+    //if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
+    //{
         
         if(read_header(client_sock,header_buffer) < 0)
         {
-            LOG("Read Http header failed\n");
+            LOG("<handle_client>Read Http header failed</handle_client>\n");
             return;
-        } else 
+        }else          
         {
             char * p = strstr(header_buffer,"CONNECT"); /* 判断是否是http 隧道请求 */
 	    if(p) 
@@ -390,59 +387,60 @@ void handle_client(void * arg)
             LOG("Host:%s port: %d io_flag:%d\n",remote_host,remote_port,io_flag);
 
         }
-    }
+    //}
 
     if ((remote_sock = create_connection()) < 0) {
         LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
         return;
     
     }
-    sock.client_sock = client_sock;
-    sock.remote_sock = remote_sock;
-    sock.is_http_tunnel = is_http_tunnel;
-    sock.io_flag = io_flag;
-    if ((pthread_create(&newthread , NULL, (void *)remote_to_client, (void *)&sock) != 0)){
+    sock->client_sock = client_sock;
+    sock->remote_sock = remote_sock;
+    sock->is_http_tunnel = is_http_tunnel;
+    sock->io_flag = io_flag;
+//ttt
+   if ((pthread_create(&newthread , NULL, (void *)remote_to_client, (void *)sock) != 0)){
+
             LOG("create thread error\n");
-            return ;
+            exit(0) ;
     }
-    if ((pthread_create(&newthread , NULL, (void *)client_to_remote, (void *)&sock) != 0)){
+    if ((pthread_create(&newthread , NULL, (void *)client_to_remote, (void *)sock) != 0)){
             LOG("create thread error\n");
-            return ;
+            exit(0) ;
     }
-    close(sock.client_sock);
 
 }
 
 //aaa
 void client_to_remote(void * arg){// 创建子进程用于从客户端转发数据到远端socket接口
- 	SOCK sock = *(SOCK *)arg;
-        if(strlen(header_buffer) > 0 && !(sock.is_http_tunnel)) 
+ 	SOCK *sock = arg;
+        if(strlen(header_buffer) > 0 && !(sock->is_http_tunnel)) 
         {
-            forward_header(sock.remote_sock); //普通的http请求先转发header
+            forward_header(sock->remote_sock); //普通的http请求先转发header
         } 
         
-        forward_data(sock.client_sock, sock.remote_sock);
-	close(sock.remote_sock);
+        forward_data(sock->client_sock, sock->remote_sock);
+        LOG("<client_to_remote>client_sock[:%d]-remote_sock[:%d]</client_to_remote>\n",sock->client_sock,sock->remote_sock);
 
 }
 //ddd
 void remote_to_client(void * arg) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
-	SOCK sock = *(SOCK *)arg;
-        if(sock.io_flag == W_S_ENC)
+	SOCK *sock = arg;
+        if(sock->io_flag == W_S_ENC)
         {
             io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-        } else if (sock.io_flag == R_C_DEC)
+        } else if (sock->io_flag == R_C_DEC)
         {
              io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
         }
 
-        if(sock.is_http_tunnel)
+        if(sock->is_http_tunnel)
         {
-            send_tunnel_ok(sock.client_sock);
+            send_tunnel_ok(sock->client_sock);
         } 
 
-        forward_data(sock.remote_sock, sock.client_sock);
-	close(sock.remote_sock);
+        forward_data(sock->remote_sock, sock->client_sock);
+	LOG("<remote_to_client>remote_sock[:%d]-client_sock[:%d]</client_to_remote>\n",sock->remote_sock,sock->client_sock);
 }
 
 
@@ -524,7 +522,7 @@ void rewrite_header()
     }
 }
 
-
+//fff
 void forward_data(int source_sock, int destination_sock) {
     char buffer[BUF_SIZE];
     int n;
@@ -564,12 +562,12 @@ int create_connection() {
     server_addr.sin_port = htons(remote_port);
 
     if (connect(sock, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        LOG("<create_connection>CLIENT_CONNECT_ERROR</create_connection\n");
+        LOG("<create_connection>CLIENT_CONNECT_ERROR</create_connection>\n");
         return CLIENT_CONNECT_ERROR;
-    }{
-        LOG("<create_connection>connected to host:%s port:%d</create_connection\n",remote_host,remote_port);
     }
-
+    else{
+        LOG("<create_connection>connected to host:%s port:%d</create_connection>\n",remote_host,remote_port);
+    }
     return sock;
 }
 
@@ -625,10 +623,10 @@ void server_loop() {
             exit(0);
         }
 	#endif
-//ll 
+//ttt 
 	if ((pthread_create(&newthread , NULL, (void *)handle_client,(void *)&client_sock) != 0)){ 
 	    LOG("create thread error\n");
-	    return;
+	    exit(0);
 	}
     }
 
