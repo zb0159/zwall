@@ -12,7 +12,7 @@
 #include <sys/wait.h>
 #include <netinet/in.h> 
 #include <stdarg.h>
-#include <pthread.h>
+
 
 #define BUF_SIZE 8192
 
@@ -35,7 +35,7 @@
 
 #define MAX_HEADER_SIZE 8192
 
-#define COMMLIB_DBG_FILE  "./log.log"
+#define COMMLIB_DBG_FILE  "./Log.log"
 
 char remote_host[128]; 
 int remote_port; 
@@ -44,6 +44,10 @@ int local_port;
 int server_sock; 
 int client_sock;
 int remote_sock;
+
+
+
+
 char * header_buffer ;
 
 
@@ -56,18 +60,12 @@ enum
 
 static int io_flag; /* 网络io的一些标志位 */
 static int m_pid; /* 保主进程id */
-#define LOG(fmt...)  do { fprintf(stderr, ##fmt); } while(0)
 
-typedef struct {
-    int client_sock;
-    int remote_sock;
-    int is_http_tunnel;
-    int io_flag;
-}SOCK;
+
 
 void server_loop();
 void stop_server();
-void handle_client(void *);
+void handle_client(int client_sock, struct sockaddr_in client_addr);
 void forward_header(int destination_sock);
 void forward_data(int source_sock, int destination_sock);
 void rewrite_header();
@@ -79,10 +77,9 @@ const char * get_work_mode() ;
 int create_connection() ;
 int _main(int argc, char *argv[]) ;
 ssize_t readLine(int sock, char *buf, size_t size);
-void remote_to_client(void *);
-void client_to_remote(void *);
 
-void LOGlog(const char *str, ...)
+
+void LOG(const char *str, ...)
 {
     va_list ap;
     FILE *fh = NULL;
@@ -125,13 +122,14 @@ ssize_t readLine(int sock, char *buf, size_t size)
     buf[i] = '\0';
     return(i);
 }
-//hhh
+
 int read_header(const int fd, void * buffer)
 {
     // bzero(header_buffer,sizeof(MAX_HEADER_SIZE));
     memset(header_buffer,0,MAX_HEADER_SIZE);
     char line_buffer[2048];
     char * base_ptr = header_buffer;
+
     for(;;)
     {
         memset(line_buffer,0,2048);
@@ -139,7 +137,7 @@ int read_header(const int fd, void * buffer)
         int total_read = readLine(fd,line_buffer,2048);
         if(total_read <= 0)
         {   
-	    LOG("<read-header>-CLIENT_SOCKET_EEROR\n");
+	    LOG("read-header-CLIENT_SOCKET_EEROR\n");
             return CLIENT_SOCKET_ERROR;
         }
         //防止header缓冲区蛮越界
@@ -149,7 +147,7 @@ int read_header(const int fd, void * buffer)
            base_ptr += total_read;
         } else 
         {   
-	    LOG("<read-header>-HEADER_BUFFER_FULL\n");
+	    LOG("read-header-HEADER_BUFFER_FULL\n");
             return HEADER_BUFFER_FULL;
         }
 
@@ -159,7 +157,6 @@ int read_header(const int fd, void * buffer)
             break;
         }
     }
-    //ddLOG("<read_header>\nheader_buffer==================%s\n</read_header>\n",header_buffer);
     return 0;
 
 }
@@ -245,8 +242,8 @@ int extract_host(const char * header)
         remote_port = 80;
     
     }
-    //ddLOG("extra-host=%s\n",header);
-    //ddLOG("extra_host=%s:[%d]\n",remote_host,remote_port);
+    LOG("extra-host--%s\n",header);
+    LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
     return 0;
 }
 
@@ -259,7 +256,7 @@ int send_tunnel_ok(int client_sock)
     strcpy(buffer,resp);
     if(send_data(client_sock,buffer,len) < 0)
     {
-        LOG("<send_tunnel_ok>Send http tunnel response to clinet_sock[:%d] failed</send_tunnel_ok>\n",client_sock);
+        perror("Send http tunnel response  failed\n");
         return -1;
     }
     return 0;
@@ -348,23 +345,20 @@ const char * get_work_mode()
 }
 
 /* 处理客户端的连接 */
-void handle_client(void * arg)
+void handle_client(int client_sock, struct sockaddr_in client_addr)
 {
-    int client_sock = *(int *)arg;
-    int is_http_tunnel = 0;
-    pthread_t newthread;
-    SOCK *sock = (SOCK *)malloc(sizeof(SOCK)); 
-    //if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
-    //{
+    int is_http_tunnel = 0; 
+    if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
+    {
         
         if(read_header(client_sock,header_buffer) < 0)
         {
-            LOG("<handle_client>Read Http header failed</handle_client>\n");
+            LOG("Read Http header failed\n");
             return;
-        }else          
+        } else 
         {
             char * p = strstr(header_buffer,"CONNECT"); /* 判断是否是http 隧道请求 */
-	    if(p) 
+            if(p) 
             {
                 LOG("receive CONNECT request\n");
                 is_http_tunnel = 1;
@@ -387,62 +381,52 @@ void handle_client(void * arg)
             LOG("Host:%s port: %d io_flag:%d\n",remote_host,remote_port,io_flag);
 
         }
-    //}
+    }
 
     if ((remote_sock = create_connection()) < 0) {
         LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
         return;
-    
-    }
-    sock->client_sock = client_sock;
-    sock->remote_sock = remote_sock;
-    sock->is_http_tunnel = is_http_tunnel;
-    sock->io_flag = io_flag;
-//ttt
-   if ((pthread_create(&newthread , NULL, (void *)remote_to_client, (void *)sock) != 0)){
-
-            LOG("create thread error\n");
-            exit(0) ;
-    }
-    if ((pthread_create(&newthread , NULL, (void *)client_to_remote, (void *)sock) != 0)){
-            LOG("create thread error\n");
-            exit(0) ;
     }
 
-}
 
-//aaa
-void client_to_remote(void * arg){// 创建子进程用于从客户端转发数据到远端socket接口
- 	SOCK *sock = arg;
-        if(strlen(header_buffer) > 0 && !(sock->is_http_tunnel)) 
+    if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
+
+        if(strlen(header_buffer) > 0 && !is_http_tunnel) 
         {
-            forward_header(sock->remote_sock); //普通的http请求先转发header
+            forward_header(remote_sock); //普通的http请求先转发header
         } 
         
-        forward_data(sock->client_sock, sock->remote_sock);
-        LOG("<client_to_remote>client_sock[:%d]-remote_sock[:%d]</client_to_remote>\n",sock->client_sock,sock->remote_sock);
+        forward_data(client_sock, remote_sock);
+        exit(0);
+    }
+    else{
+        if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
 
-}
-//ddd
-void remote_to_client(void * arg) {// 创建子进程用于转发从远端socket接口过来的数据到客户端
-	SOCK *sock = arg;
-        if(sock->io_flag == W_S_ENC)
-        {
-            io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-        } else if (sock->io_flag == R_C_DEC)
-        {
-             io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+            if(io_flag == W_S_ENC)
+            {
+                io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+            } else if (io_flag == R_C_DEC)
+            {
+                 io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+            }
+
+            if(is_http_tunnel)
+            {
+                send_tunnel_ok(client_sock);
+            } 
+
+            forward_data(remote_sock, client_sock);
+   	    exit(0);
         }
-
-        if(sock->is_http_tunnel)
-        {
-            send_tunnel_ok(sock->client_sock);
-        } 
-
-        forward_data(sock->remote_sock, sock->client_sock);
-	LOG("<remote_to_client>remote_sock[:%d]-client_sock[:%d]</client_to_remote>\n",sock->remote_sock,sock->client_sock);
+	else{
+	    int pid,status;
+	    while((pid=wait(&status))>0)
+	    close(remote_sock);
+	    close(client_sock);
+	
+	} 
+    }
 }
-
 
 void forward_header(int destination_sock)
 {
@@ -522,7 +506,7 @@ void rewrite_header()
     }
 }
 
-//fff
+
 void forward_data(int source_sock, int destination_sock) {
     char buffer[BUF_SIZE];
     int n;
@@ -546,12 +530,12 @@ int create_connection() {
     int sock;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-        LOG("<create_connetion>CLIENT_SOCKET_ERROR</create_connection\n");
+        LOG("CLIENT_SOCKET_ERROR\n");
 	return CLIENT_SOCKET_ERROR;
     }
 
     if ((server = gethostbyname(remote_host)) == NULL) {
-        LOG("<create_connetion>CLIENT_RESOLVE_ERROR</create_connection\n");
+        LOG("CLIENT_RESOLVE_ERROR\n");
         errno = EFAULT;
         return CLIENT_RESOLVE_ERROR;
     }
@@ -562,12 +546,10 @@ int create_connection() {
     server_addr.sin_port = htons(remote_port);
 
     if (connect(sock, (struct sockaddr *) &server_addr, sizeof(server_addr)) < 0) {
-        LOG("<create_connection>CLIENT_CONNECT_ERROR</create_connection>\n");
+        LOG("CLIENT_CONNECT_ERROR\n");
         return CLIENT_CONNECT_ERROR;
     }
-    else{
-        LOG("<create_connection>connected to host:%s port:%d</create_connection>\n",remote_host,remote_port);
-    }
+
     return sock;
 }
 
@@ -608,26 +590,21 @@ void sigchld_handler(int signal) {
 void server_loop() {
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
-    pthread_t newthread;
+
     while (1) {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
-	char *client_ip = inet_ntoa(client_addr.sin_addr);
-	LOG("<server_loop>\n%s IN-----client_sock=%d\n</server_loop>\n",client_ip,client_sock);
         #ifdef PROPERTY
+	char *client_ip = inet_ntoa(client_addr.sin_addr);
 	if(strcmp(client_ip,"119.29.173.95") != 0) {
             LOG("%s have  no prorirty\n",client_ip);
             continue;
         }
+	#endif
+ 
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-	    handle_client(client_sock);
+	    handle_client(client_sock, client_addr);
             exit(0);
         }
-	#endif
-//ttt 
-	if ((pthread_create(&newthread , NULL, (void *)handle_client,(void *)&client_sock) != 0)){ 
-	    LOG("create thread error\n");
-	    exit(0);
-	}
     }
 
 }
@@ -667,6 +644,7 @@ void start_server(int daemon)
         if((pid = fork()) == 0)
         {
             server_loop();
+            printf("close  server_sock =%d\n",close(server_sock));
         } else if (pid > 0 ) 
         {
             m_pid = pid;
@@ -678,11 +656,11 @@ void start_server(int daemon)
             exit(pid);
         }
 	setsid();
-    } else 
+   } else 
     {
         server_loop();
+        close(server_sock); 
     }
-    close(server_sock); 
 
 }
 
