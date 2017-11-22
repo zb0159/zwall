@@ -416,15 +416,11 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
             } 
 
             forward_data(remote_sock, client_sock);
-   	    exit(0);
+   	        exit(0);
         }
-	else{
-	    int pid,status;
-	    while((pid=wait(&status))>0)
-	    close(remote_sock);
-	    close(client_sock);
+	    else{
 	
-	} 
+    	} 
     }
 }
 
@@ -584,7 +580,10 @@ int create_server_socket(int port) {
 
 /* 处理僵尸进程 */
 void sigchld_handler(int signal) {
-    while (waitpid(-1, NULL, WNOHANG) > 0);
+    while (waitpid(-1, NULL, WNOHANG) > 0){\
+        close(remote_sock);
+        close(client_sock);
+    }
 }
 
 void server_loop() {
@@ -602,7 +601,7 @@ void server_loop() {
 	#endif
  
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-	    handle_client(client_sock, client_addr);
+	        handle_client(client_sock, client_addr);
             exit(0);
         }
     }
