@@ -419,7 +419,10 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
    	        exit(0);
         }
 	    else{
-	
+            int pid;
+            while((pid =wait(NULL)) > 0);
+            close(remote_sock);
+            close(client_sock);
     	} 
     }
 }
@@ -601,7 +604,8 @@ void server_loop() {
 	#endif
  
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-	        handle_client(client_sock, client_addr);
+            close(server_sock);
+            handle_client(client_sock, client_addr);
             exit(0);
         }
     }
