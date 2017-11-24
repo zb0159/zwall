@@ -397,34 +397,33 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
         
         forward_data(client_sock, remote_sock);
+        close(remote_sock);
+        close(client_sock);
         exit(0);
     }
-    else{
-        if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+    if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
 
-            if(io_flag == W_S_ENC)
-            {
-                io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-            } else if (io_flag == R_C_DEC)
-            {
-                 io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
-            }
-
-            if(is_http_tunnel)
-            {
-                send_tunnel_ok(client_sock);
-            } 
-
-            forward_data(remote_sock, client_sock);
-   	        exit(0);
+        if(io_flag == W_S_ENC)
+        {
+            io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+        } else if (io_flag == R_C_DEC)
+        {
+            io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
         }
-	    else{
-	        int pid;
-            while((pid=wait(NULL)) > 0);
-            close(client_sock);
-            close(remote_sock);
-    	} 
+
+        if(is_http_tunnel)
+        {
+            send_tunnel_ok(client_sock);
+        } 
+
+        forward_data(remote_sock, client_sock);
+        close(remote_sock);
+        close(client_sock);
+   	    exit(0);
+    
     }
+    if(client_sock) close(client_sock);
+    if(remote_sock) close(remote_sock);
 }
 
 void forward_header(int destination_sock)
@@ -584,8 +583,8 @@ int create_server_socket(int port) {
 /* 处理僵尸进程 */
 void sigchld_handler(int signal) {
     while (waitpid(-1, NULL, WNOHANG) > 0){
-	    close(client_sock); 
         close(remote_sock);
+        close(client_sock);
     }
 }
 
@@ -652,13 +651,14 @@ void start_server(int daemon)
         {
             m_pid = pid;
             LOG("mporxy pid is: [%d]\n",pid);
-	    exit(0);
+            close(server_sock);
+	        exit(0);
         } else 
         {
             LOG("Cannot daemonize\n");
             exit(pid);
         }
-	setsid();
+    	setsid();
    } else 
     {
         server_loop();
