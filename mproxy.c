@@ -397,8 +397,6 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
         
         forward_data(client_sock, remote_sock);
-        close(client_sock);
-        close(remote_sock);
         exit(0);
     }
     if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
@@ -417,8 +415,6 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         } 
 
         forward_data(remote_sock, client_sock);
-        close(client_sock);
-        close(remote_sock);
    	    exit(0);
     }
     
