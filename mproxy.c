@@ -602,6 +602,7 @@ void server_loop() {
             handle_client(client_sock, client_addr);
             exit(0);
         }
+	close(client_sock);
     }
 
 }
