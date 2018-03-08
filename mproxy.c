@@ -35,7 +35,7 @@
 
 #define MAX_HEADER_SIZE 8192
 
-#define COMMLIB_DBG_FILE  "./Log.log"
+#define COMMLIB_DBG_FILE  "./log.log"
 
 char remote_host[128]; 
 int remote_port; 
@@ -400,32 +400,29 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
         close(client_sock);
         close(remote_sock);
         exit(0);
-    }
-    if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+    }else{
+        if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
 
-        if(io_flag == W_S_ENC)
-        {
-            io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-        } else if (io_flag == R_C_DEC)
-        {
-            io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
-        }
+            if(io_flag == W_S_ENC)
+            {
+                io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+            } else if (io_flag == R_C_DEC)
+            {
+                io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+            }
 
-        if(is_http_tunnel)
-        {
-            send_tunnel_ok(client_sock);
-        } 
+            if(is_http_tunnel)
+            {
+                send_tunnel_ok(client_sock);
+            }    
 
-        forward_data(remote_sock, client_sock);
-        close(client_sock);
-        close(remote_sock);
-   	    exit(0);
+            forward_data(remote_sock, client_sock);
+            close(client_sock);
+            close(remote_sock);
+   	        exit(0);
     
+        }
     }
-    if(client_sock > 0)
-        close(client_sock);
-    if(remote_sock > 0)
-        close(remote_sock);
 }
 
 void forward_header(int destination_sock)
@@ -605,11 +602,12 @@ void server_loop() {
 	#endif
  
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-            close(server_sock);
+            //close(server_sock);
             handle_client(client_sock, client_addr);
             exit(0);
+        }else{
+            close(client_sock);
         }
-        close(client_sock);
     }
 
 }
@@ -649,12 +647,13 @@ void start_server(int daemon)
         if((pid = fork()) == 0)
         {
             server_loop();
-            printf("close  server_sock =%d\n",close(server_sock));
+            //printf("close  server_sock =%d\n",close(server_sock));
+            exit(0);
         } else if (pid > 0 ) 
         {
             m_pid = pid;
             LOG("mporxy pid is: [%d]\n",pid);
-            close(server_sock);
+            //close(server_sock);
 	        exit(0);
         } else 
         {
@@ -665,8 +664,10 @@ void start_server(int daemon)
    } else 
     {
         server_loop();
-        close(server_sock); 
+        //close(server_sock); 
     }
+    close(server_sock);
+    free(header_buffer);
 
 }
 
