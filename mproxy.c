@@ -12,8 +12,9 @@
 #include <sys/wait.h>
 #include <netinet/in.h> 
 #include <stdarg.h>
-
-
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/param.h> 
 #define BUF_SIZE 8192
 
 #define READ  0
@@ -81,6 +82,7 @@ ssize_t readLine(int sock, char *buf, size_t size);
 
 void LOG(const char *str, ...)
 {
+/**
     va_list ap;
     FILE *fh = NULL;
     if((fh = fopen(COMMLIB_DBG_FILE, "a")))
@@ -92,6 +94,7 @@ void LOG(const char *str, ...)
         fclose(fh);
         fh = NULL;
     }   
+**/
 }
 
 ssize_t readLine(int sock, char *buf, size_t size)
@@ -137,7 +140,7 @@ int read_header(const int fd, void * buffer)
         int total_read = readLine(fd,line_buffer,2048);
         if(total_read <= 0)
         {   
-	    LOG("read-header-CLIENT_SOCKET_EEROR\n");
+	    LOG("read-header-CLIENT_SOCKET_EEROR,fd=%d\n",fd);
             return CLIENT_SOCKET_ERROR;
         }
         //防止header缓冲区蛮越界
@@ -242,8 +245,8 @@ int extract_host(const char * header)
         remote_port = 80;
     
     }
-    LOG("extra-host--%s\n",header);
-    LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
+    //LOG("extra-host--%s\n",header);
+    //LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
     return 0;
 }
 
@@ -347,7 +350,8 @@ const char * get_work_mode()
 /* 处理客户端的连接 */
 void handle_client(int client_sock, struct sockaddr_in client_addr)
 {
-    int is_http_tunnel = 0; 
+    int is_http_tunnel = 0;
+    pid_t pid;
     if(strlen(remote_host) == 0) /* 未指定远端主机名称从http 请求 HOST 字段中获取 */
     {
         
@@ -384,45 +388,48 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
     }
 
     if ((remote_sock = create_connection()) < 0) {
+        close(client_sock);
+        close(remote_sock);
         LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
         return;
     }
 
 
-    if (fork() == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
-
+    if ((pid = fork()) == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
+        LOG("header_buffer=%s,http_tunel=%d\n",header_buffer,is_http_tunnel);
         if(strlen(header_buffer) > 0 && !is_http_tunnel) 
         {
             forward_header(remote_sock); //普通的http请求先转发header
         } 
         
         forward_data(client_sock, remote_sock);
-        close(client_sock);
         close(remote_sock);
+        close(client_sock);
         exit(0);
-    }else{
-        if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
-
-            if(io_flag == W_S_ENC)
-            {
-                io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-            } else if (io_flag == R_C_DEC)
-            {
-                io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
-            }
-
+    }
+    if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
+            /**
+              if(io_flag == W_S_ENC)
+              {
+              io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
+              } else if (io_flag == R_C_DEC)
+              {
+              io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
+              }
+             **/
+            io_flag =W_S_ENC;
             if(is_http_tunnel)
             {
-                send_tunnel_ok(client_sock);
+                    send_tunnel_ok(client_sock);
             }    
 
             forward_data(remote_sock, client_sock);
-            close(client_sock);
             close(remote_sock);
-   	        exit(0);
-    
-        }
+            close(client_sock);
+            exit(0);
+
     }
+      
 }
 
 void forward_header(int destination_sock)
@@ -581,10 +588,7 @@ int create_server_socket(int port) {
 
 /* 处理僵尸进程 */
 void sigchld_handler(int signal) {
-    while (waitpid(-1, NULL, WNOHANG) > 0){
-        close(remote_sock);
-        close(client_sock);
-    }
+    while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
 void server_loop() {
@@ -594,20 +598,21 @@ void server_loop() {
     while (1) {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
         #ifdef PROPERTY
-	char *client_ip = inet_ntoa(client_addr.sin_addr);
-	if(strcmp(client_ip,"119.29.173.95") != 0) {
+	    char *client_ip = inet_ntoa(client_addr.sin_addr);
+	    if(strcmp(client_ip,"119.29.173.95") != 0) {
             LOG("%s have  no prorirty\n",client_ip);
             continue;
         }
-	#endif
+	    #endif
  
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-            //close(server_sock);
+            close(server_sock);
+
             handle_client(client_sock, client_addr);
             exit(0);
-        }else{
-            close(client_sock);
         }
+        close(client_sock);
+        
     }
 
 }
@@ -630,44 +635,49 @@ void usage(void)
 
 void start_server(int daemon)
 {
-    //初始化全局变量
-    header_buffer = (char *) malloc(MAX_HEADER_SIZE);
-
-    signal(SIGCHLD, sigchld_handler); // 防止子进程变成僵尸进程
-
-    if ((server_sock = create_server_socket(local_port)) < 0) 
-    { // start server
-        LOG("Cannot run server on %d\n",local_port);
-        exit(server_sock);
-    }
    
     if(daemon)
     {
         pid_t pid;
-        if((pid = fork()) == 0)
-        {
-            server_loop();
-            //printf("close  server_sock =%d\n",close(server_sock));
-            exit(0);
-        } else if (pid > 0 ) 
+        if((pid = fork()) > 0)
         {
             m_pid = pid;
             LOG("mporxy pid is: [%d]\n",pid);
             //close(server_sock);
 	        exit(0);
-        } else 
+        } else if(pid < 0)
         {
             LOG("Cannot daemonize\n");
             exit(pid);
         }
-    	setsid();
+        
+    	    setsid();
+            //chdir("/"); //改变当前工作目录，这也是为了摆脱父进程的影响
+            umask(0);     //重设文件权限掩码
+            //close(0);
+           // close(1);
+            //close(2);
+            //初始化全局变量
+            header_buffer = (char *) malloc(MAX_HEADER_SIZE);
+
+            signal(SIGCHLD, sigchld_handler); // 防止子进程变成僵尸进程
+
+            if ((server_sock = create_server_socket(local_port)) < 0) 
+            { // start server
+                LOG("Cannot run server on %d\n",local_port);
+                exit(server_sock);
+            }
+            server_loop();
+            //printf("close  server_sock =%d\n",close(server_sock));
+            close(server_sock);
+            free(header_buffer);
+            //exit(0);
+         
    } else 
     {
-        server_loop();
+        usage();
         //close(server_sock); 
     }
-    close(server_sock);
-    free(header_buffer);
 
 }
 
@@ -682,7 +692,7 @@ int _main(int argc, char *argv[])
     io_flag = FLG_NONE;
     int daemon = 0; 
 
-    char info_buf[2048];
+   // char info_buf[2048];
 	
 	int opt;
 	char optstrs[] = ":l:h:dED";
@@ -725,8 +735,8 @@ int _main(int argc, char *argv[])
 		}
     }
 
-    get_info(info_buf);
-    LOG("%s\n",info_buf);
+    //get_info(info_buf);
+    //LOG("%s\n",info_buf);
     start_server(daemon);
     return 0;
 
