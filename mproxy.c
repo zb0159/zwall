@@ -10,6 +10,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
+#include <sys/epoll.h>
 #include <netinet/in.h> 
 #include <stdarg.h>
 #include <sys/types.h>
@@ -64,11 +66,12 @@ static int m_pid; /* 保主进程id */
 
 
 
+int setnonblocking(int sockfd);
 void server_loop();
 void stop_server();
-void handle_client(int client_sock, struct sockaddr_in client_addr);
+void handle_client(int client_sock);
 void forward_header(int destination_sock);
-void forward_data(int source_sock, int destination_sock);
+int forward_data(int source_sock, int destination_sock);
 void rewrite_header();
 int send_data(int socket,char * buffer,int len );
 int receive_data(int socket, char * buffer, int len,int flags);
@@ -77,12 +80,11 @@ void get_info(char * output);
 const char * get_work_mode() ;
 int create_connection() ;
 int _main(int argc, char *argv[]) ;
+void set_time_out(int sockfd);
 ssize_t readLine(int sock, char *buf, size_t size);
-
-
-void LOG(const char *str, ...)
+void p_log(const char *str, ...)
 {
-/**
+    
     va_list ap;
     FILE *fh = NULL;
     if((fh = fopen(COMMLIB_DBG_FILE, "a")))
@@ -93,9 +95,30 @@ void LOG(const char *str, ...)
         va_end(ap); 
         fclose(fh);
         fh = NULL;
-    }   
-**/
+    } 
+
 }
+void LOG(const char *str, ...)
+{}
+
+void set_time_out(int sockfd){
+        struct timeval time_out;  
+        time_out.tv_sec=5;  
+        time_out.tv_usec=0;  
+        if(setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &time_out, sizeof(time_out)) < 0)  
+        {  
+                perror("fail to setsockopt");  
+        }
+}
+int setnonblocking(int sockfd)    
+{    
+    if (fcntl(sockfd, F_SETFL, 
+	      fcntl(sockfd, F_GETFD, 0)|O_NONBLOCK) == -1) {    
+        return -1;    
+    }    
+    return 0;    
+}  
+
 
 ssize_t readLine(int sock, char *buf, size_t size)
 {
@@ -132,7 +155,6 @@ int read_header(const int fd, void * buffer)
     memset(header_buffer,0,MAX_HEADER_SIZE);
     char line_buffer[2048];
     char * base_ptr = header_buffer;
-
     for(;;)
     {
         memset(line_buffer,0,2048);
@@ -140,7 +162,7 @@ int read_header(const int fd, void * buffer)
         int total_read = readLine(fd,line_buffer,2048);
         if(total_read <= 0)
         {   
-	    LOG("read-header-CLIENT_SOCKET_EEROR,fd=%d\n",fd);
+	        LOG("read-header-CLIENT_SOCKET_EEROR,fd=%d\n",fd);
             return CLIENT_SOCKET_ERROR;
         }
         //防止header缓冲区蛮越界
@@ -150,7 +172,7 @@ int read_header(const int fd, void * buffer)
            base_ptr += total_read;
         } else 
         {   
-	    LOG("read-header-HEADER_BUFFER_FULL\n");
+	        LOG("read-header-HEADER_BUFFER_FULL\n");
             return HEADER_BUFFER_FULL;
         }
 
@@ -160,6 +182,7 @@ int read_header(const int fd, void * buffer)
             break;
         }
     }
+    LOG("HEADER_BUFFER=%s\n",header_buffer);
     return 0;
 
 }
@@ -178,7 +201,37 @@ void extract_server_path(const char * header,char * output)
     }
     
 }
+int extract_host1(const char *header){
+        char *saveptr,*saveptr1;
+        char head[4096];
+        strcpy(head,header);
 
+        char * p = strstr(head,"Host:");
+        if(!p)
+        {
+                return BAD_HTTP_PROTOCOL;
+        }
+        char * p1 = strtok_r(p+6,"\n",&saveptr1);
+        if(!p1)
+        {
+                return BAD_HTTP_PROTOCOL;
+        }
+        char *host = strtok_r(p1,":",&saveptr);
+        if(strcmp(saveptr,"") == 0){
+            remote_port = 80;
+            strcpy(remote_host,host);
+            remote_host[strlen(host)] = '\0';
+        }else{
+            remote_port = atoi(saveptr);
+            strcpy(remote_host,host);
+
+        }
+        if(remote_port==80)
+        LOG("REMOTE_HOST:%s[%d]\n",remote_host,remote_port);
+        return 0;
+
+
+}
 int extract_host(const char * header)
 {
 
@@ -245,8 +298,8 @@ int extract_host(const char * header)
         remote_port = 80;
     
     }
-    //LOG("extra-host--%s\n",header);
-    //LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
+    LOG("extra-host--%s\n",header);
+    LOG("extra_host-%s:[%d]\n",remote_host,remote_port);
     return 0;
 }
 
@@ -348,7 +401,7 @@ const char * get_work_mode()
 }
 
 /* 处理客户端的连接 */
-void handle_client(int client_sock, struct sockaddr_in client_addr)
+void handle_client(int client_sock)
 {
     int is_http_tunnel = 0;
     pid_t pid;
@@ -368,6 +421,7 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
                 is_http_tunnel = 1;
             }
 
+/**
             if(strstr(header_buffer,"GET /mproxy") >0 ) 
             {
                 LOG("====== hand mproxy info request ====");
@@ -376,56 +430,55 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
 
                 return; 
             }
-
+**/
+            
             if(extract_host(header_buffer) < 0) 
             {
                 LOG("Cannot extract host field,bad http protrotol");
                 return;
             }
             LOG("Host:%s port: %d io_flag:%d\n",remote_host,remote_port,io_flag);
-
         }
     }
+    if(!is_http_tunnel)
+        LOG("header_buffer=%s\n",header_buffer);
 
     if ((remote_sock = create_connection()) < 0) {
         close(client_sock);
+    
         close(remote_sock);
         LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
         return;
     }
-
-
     if ((pid = fork()) == 0) { // 创建子进程用于从客户端转发数据到远端socket接口
-        LOG("header_buffer=%s,http_tunel=%d\n",header_buffer,is_http_tunnel);
         if(strlen(header_buffer) > 0 && !is_http_tunnel) 
         {
             forward_header(remote_sock); //普通的http请求先转发header
         } 
         
-        forward_data(client_sock, remote_sock);
-        close(remote_sock);
-        close(client_sock);
+        if((forward_data(client_sock, remote_sock)) <= 0){
+                close(remote_sock);
+                close(client_sock);
+                exit(0);
+        
+        }
         exit(0);
     }
     if (fork() == 0) { // 创建子进程用于转发从远端socket接口过来的数据到客户端
-            /**
-              if(io_flag == W_S_ENC)
-              {
-              io_flag = R_C_DEC; //发送请求给服务端进行编码，读取服务端的响应则进行解码
-              } else if (io_flag == R_C_DEC)
-              {
-              io_flag = W_S_ENC; //接收客户端请求进行解码，那么响应客户端请求需要编码
-              }
-             **/
             io_flag =W_S_ENC;
             if(is_http_tunnel)
             {
-                    send_tunnel_ok(client_sock);
+                
+                if((send_tunnel_ok(client_sock))<0)
+                     exit(0);
             }    
-
-            forward_data(remote_sock, client_sock);
-            close(remote_sock);
-            close(client_sock);
+            
+            if((forward_data(remote_sock, client_sock))<= 0){
+                    close(remote_sock);
+                    close(client_sock);
+                    exit(0);
+            
+            }
             exit(0);
 
     }
@@ -435,10 +488,8 @@ void handle_client(int client_sock, struct sockaddr_in client_addr)
 void forward_header(int destination_sock)
 {
     rewrite_header();
-    #ifdef DEBUG
-        LOG("================ The Forward HEAD =================");
-        LOG("%s\n",header_buffer);
-    #endif
+    
+        //p_log("forward_header=%s\n",header_buffer);
    
     int len = strlen(header_buffer);
     send_data(destination_sock,header_buffer,len) ;
@@ -508,22 +559,33 @@ void rewrite_header()
 
         }
     }
+    //p_log("rewrite_header=%s\n",header_buffer);
 }
 
 
-void forward_data(int source_sock, int destination_sock) {
+int forward_data(int source_sock, int destination_sock) {
     char buffer[BUF_SIZE];
     int n;
 
-    while ((n = receive_data(source_sock, buffer, BUF_SIZE,0)) > 0) 
-    { 
+    while (1) 
+    {
+        if((n = receive_data(source_sock, buffer, BUF_SIZE,0)) > 0){
+            if (errno != 0) 
+            {  
+                p_log("errno =%d\n",errno);
+                break;
+            }
+            send_data(destination_sock, buffer, n); 
 
-        send_data(destination_sock, buffer, n); 
+        }else{
+           break;
+        }
     }
 
     shutdown(destination_sock, SHUT_RDWR); 
 
     shutdown(source_sock, SHUT_RDWR); 
+    return n;
 }
 
 
@@ -590,7 +652,88 @@ int create_server_socket(int port) {
 void sigchld_handler(int signal) {
     while (waitpid(-1, NULL, WNOHANG) > 0);
 }
+/**
+void epollz()
+{
+     struct sockaddr_in client_addr;
+ socklen_t addrlen = sizeof(client_addr);
 
+  //声明epoll_event结构体的变量,ev用于注册事件,数组用于回传要处理的事件
+    struct epoll_event ev, events[50];
+    //生成用于处理accept的epoll专用的文件描述符
+    char line[128];
+    int epfd = epoll_create(256);
+    int i,sockfd;
+    for ( ; ; )
+    {
+        //等待epoll事件的发生
+        int nfds = epoll_wait(epfd, events, 20, 500);
+        //处理所发生的所有事件
+        for(i = 0; i < nfds; ++i)
+        {
+            if(events[i].data.fd == server_sock)
+            {
+
+                client_sock = accept(server_sock,  (struct sockaddr*)&client_addr,  &addrlen);
+                if(client_sock < 0)
+                {
+                    perror("connfd<0");
+                    exit(1);
+                }
+                setnonblocking(client_sock);
+
+                //设置用于读操作的文件描述符
+                ev.data.fd = client_sock;
+                //设置用于注测的读操作事件
+                ev.events = EPOLLIN | EPOLLET;
+                //注册ev
+                epoll_ctl(epfd, EPOLL_CTL_ADD, client_sock, &ev);
+            }
+            else if(events[i].events & EPOLLIN)
+            {
+                int n;
+                if ( (sockfd = events[i].data.fd) < 0) continue;
+                if ( (n = recv(sockfd, line, MAX_HEADER_SIZE,MSG_PEEK)) < 0)
+                {
+                    if (errno == ECONNRESET)
+                    {
+
+                        close(sockfd);
+                        events[i].data.fd = -1;
+                    }
+                    else
+                       LOG("readline error\n");
+                }
+                else if (n == 0)
+                {
+                    close(sockfd);
+                    events[i].data.fd = -1;
+                }else{
+                    handle_client(sockfd);
+                }
+                //设置用于写操作的文件描述符
+                ev.data.fd = sockfd;
+                //设置用于注测的写操作事件
+                ev.events = EPOLLOUT | EPOLLET;
+                //修改sockfd上要处理的事件为EPOLLOUT
+                epoll_ctl(epfd, EPOLL_CTL_MOD, sockfd, &ev);
+            }
+            else if(events[i].events & EPOLLOUT)
+            {
+                ev.data.fd = sockfd;
+                //设置用于注测的读操作事件
+                ev.events = EPOLLIN | EPOLLET;
+                //修改sockfd上要处理的事件为EPOLIN
+                epoll_ctl(epfd, EPOLL_CTL_MOD, sockfd, &ev);
+            }
+
+        }
+
+    }
+
+
+
+}**/
 void server_loop() {
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
@@ -604,11 +747,10 @@ void server_loop() {
             continue;
         }
 	    #endif
- 
         if (fork() == 0) { // 创建子进程处理客户端连接请求
-            close(server_sock);
-
-            handle_client(client_sock, client_addr);
+            //close(server_sock);
+            
+            handle_client(client_sock );
             exit(0);
         }
         close(client_sock);
@@ -667,7 +809,9 @@ void start_server(int daemon)
                 LOG("Cannot run server on %d\n",local_port);
                 exit(server_sock);
             }
+            set_time_out(server_sock);
             server_loop();
+            //epollz();
             //printf("close  server_sock =%d\n",close(server_sock));
             close(server_sock);
             free(header_buffer);
@@ -681,8 +825,10 @@ void start_server(int daemon)
 
 }
 
+
 int main(int argc, char *argv[])
 {
+    
     return _main(argc,argv);
 }
 
@@ -693,8 +839,7 @@ int _main(int argc, char *argv[])
     int daemon = 0; 
 
    // char info_buf[2048];
-	
-	int opt;
+    int opt;
 	char optstrs[] = ":l:h:dED";
 	char *p = NULL;
 	while(-1 != (opt = getopt(argc, argv, optstrs)))
