@@ -444,7 +444,6 @@ void handle_client(int client_sock)
         LOG("header_buffer=%s\n",header_buffer);
 
     if ((remote_sock = create_connection()) < 0) {
-        close(client_sock);
     
         close(remote_sock);
         LOG("Cannot connect to host [%s:%d]\n",remote_host,remote_port);
@@ -492,7 +491,8 @@ void forward_header(int destination_sock)
         //p_log("forward_header=%s\n",header_buffer);
    
     int len = strlen(header_buffer);
-    send_data(destination_sock,header_buffer,len) ;
+    send_data(destination_sock,header_buffer,len);
+    
 }
 
 int send_data(int socket,char * buffer,int len)
@@ -507,13 +507,15 @@ int send_data(int socket,char * buffer,int len)
            
         }
     }
-
     return send(socket,buffer,len,0);
 }
 
 int receive_data(int socket, char * buffer, int len,int flags)
 {
     int n = recv(socket, buffer, len, flags);
+    if (n <= 0) {
+        return n;
+    }
     if(io_flag == R_C_DEC && n > 0)
     {
         int i; 
