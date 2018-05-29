@@ -739,7 +739,6 @@ void epollz()
 void server_loop() {
     struct sockaddr_in client_addr;
     socklen_t addrlen = sizeof(client_addr);
-
     while (1) {
         client_sock = accept(server_sock, (struct sockaddr*)&client_addr, &addrlen);
         #ifdef PROPERTY
@@ -749,13 +748,13 @@ void server_loop() {
             continue;
         }
 	    #endif
-        if (fork() == 0) { // 创建子进程处理客户端连接请求
-            //close(server_sock);
-            
-            handle_client(client_sock );
-            exit(0);
+        if (client_sock > 0){
+                if (fork() == 0) { // 创建子进程处理客户端连接请求
+                        handle_client(client_sock );
+                        exit(0);
+                }
+                close(client_sock);
         }
-        close(client_sock);
         
     }
 
